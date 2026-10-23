@@ -5,7 +5,15 @@ Production-ready сервис машинного обучения, постро�
 - `k8s/` — Манифесты Kubernetes (`deployment.yaml`, `service.yaml`).
 - `tests/` — Модульные и интеграционные тесты (`pytest`).
 - `Dockerfile` & `compose.yaml` — Конфигурации для контейнеризации.
+---
+## Сделать перед запуском
 
+Все в дальнейшем запускать из папки churn-service
+```bash
+PYTHONPATH=src python src/churn/train.py
+```
+Создастся папка с артефактами, весами и прочим для модели
+ 
 ---
 
 ## Быстрый старт (3 основные команды)
