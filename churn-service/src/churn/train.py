@@ -2,6 +2,8 @@ import joblib
 from churn.preprocess import CaliforniaHousingPreprocessor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
+import os
+from pathlib import Path
 
 
 def train_pipeline():
@@ -25,11 +27,13 @@ def train_pipeline():
     print(f"  - MSE: {mse:.4f}")
 
     print("3. Сохранение артефактов...")
-    joblib.dump(model, "artifacts/housing_model.pkl")
-    joblib.dump(scaler, "artifacts/scaler.pkl")
-    joblib.dump(feature_names, "artifacts/feature_names.pkl")
+    joblib.dump(model, artifacts_dir / "housing_model.pkl")
+    joblib.dump(scaler, artifacts_dir / "scaler.pkl")
+    joblib.dump(feature_names, artifacts_dir / "feature_names.pkl")
     print("Готово! Все артефакты успешно сохранены.")
 
 
 if __name__ == "__main__":
+    artifacts_dir = Path(__file__).resolve().parent / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
     train_pipeline()
