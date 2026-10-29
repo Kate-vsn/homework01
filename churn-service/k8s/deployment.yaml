@@ -17,9 +17,14 @@ spec:
       containers:
       - name: churn-api
         image: churn-service:latest
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: churn-config
+        - secretRef:
+            name: churn-secrets
         resources:
           requests:
             memory: "128Mi"
