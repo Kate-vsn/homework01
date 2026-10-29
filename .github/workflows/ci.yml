@@ -117,7 +117,6 @@ jobs:
       - name: Диагностика
         if: failure()
         run: |
-
           kubectl get pods -A -o wide
           kubectl get secrets,configmap
           kubectl get events --sort-by='.lastTimestamp' | tail -20

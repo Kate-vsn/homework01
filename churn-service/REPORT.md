@@ -12,4 +12,6 @@ https://github.com/Kate-vsn/homework01/actions/runs/40918949159 - здесь о�
 
 https://github.com/Kate-vsn/homework01/actions/runs/40936149462 - указан неверный путь к модели. сначала ошибка происходила на этапе деплоя, а после добавления блока с диагностикой по примеру из курса оказалась на этапе тестов, выдавая, что не удалось загрузить артефакты модели.
 
-https://github.com/Kate-vsn/homework01/actions/runs/40927353474 - указан неверный секрет. упало тоже на деплое, и тот же лог с роллаутом. 
+https://github.com/Kate-vsn/homework01/actions/runs/40927353474 
+https://github.com/Kate-vsn/homework01/actions/runs/40937965139 (последний) - указан неверный секрет. упало на деплое, в логах таймаут на команде kubectl rollout status deployment/churn-api-deployment --timeout=120s тут понять, что проблема в секрете, та еще задача. Решила в своем ci поменять вот эту строку - name: Wait for rollout to complete
+        run: kubectl rollout status deployment/churn-api-deployment --timeout=120s на 
