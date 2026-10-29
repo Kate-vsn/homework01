@@ -4,4 +4,3 @@ metadata:
   name: churn-config
 data:
   LOG_LEVEL: "INFO"
-  MODEL_PATH: "/fake/path/model.joblib"
