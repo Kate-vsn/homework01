@@ -3,7 +3,7 @@ from churn.preprocess import CaliforniaHousingPreprocessor
 
 def test_california_preprocessor():
     preprocessor = CaliforniaHousingPreprocessor(test_size=0.2, random_state=42)
-    X_train, X_test, y_train, y_test, scaler, feature_names = (
+    X_train, X_test, y_train, _y_test, _scaler, feature_names = (
         preprocessor.load_and_preprocess_data()
     )
 

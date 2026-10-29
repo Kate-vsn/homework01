@@ -1,9 +1,11 @@
 from pathlib import Path
+
 import joblib
-from churn.preprocess import CaliforniaHousingPreprocessor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
+
+from churn.preprocess import CaliforniaHousingPreprocessor
 
 
 def train_pipeline():
