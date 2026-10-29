@@ -1,6 +1,7 @@
 import os
-import pytest
+
 import psycopg2
+import pytest
 from fastapi.testclient import TestClient
 
 from churn.service.app import app
