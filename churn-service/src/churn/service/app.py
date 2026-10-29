@@ -1,13 +1,14 @@
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
+
 import joblib
 import pandas as pd
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, Response
-from pydantic import BaseModel, Field, ConfigDict
 import psycopg2
+from fastapi import FastAPI, HTTPException, Request, Response
 from psycopg2.extras import Json
+from pydantic import BaseModel, ConfigDict, Field
 
 ml_bundle = {}
 
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
         passport = loaded_bundle.get("passport", {})
         ml_bundle["version"] = passport.get("version", "1.0.0")
         ml_bundle["features"] = passport.get("feature_names", [])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Ошибка загрузки артефактов модели: {e}")
 
     db_url = os.getenv("DATABASE_URL")
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
             conn.commit()
             cur.close()
             conn.close()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Не удалось подключиться к базе данных: {e}")
 
     yield
@@ -101,7 +102,7 @@ def predict(payload: HousingFeatures, request: Request, response: Response):
             input_df = pd.DataFrame([features_dict])
 
         pred_value = ml_bundle["pipeline"].predict(input_df)[0]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         latency_ms = (time.time() - start_time) * 1000
         log_to_db(request_id, version, features_dict, None, latency_ms, 500)
         raise HTTPException(status_code=500, detail=str(e))
@@ -143,5 +144,5 @@ def log_to_db(request_id, version, features, prediction, latency_ms, status_code
         conn.commit()
         cur.close()
         conn.close()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Ошибка логирования в БД: {e}")
