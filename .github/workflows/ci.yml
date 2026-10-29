@@ -65,7 +65,7 @@ jobs:
         with:
           context: ./churn-service
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/churn-service:sha-${{ github.sha }}
+          tags: ghcr.io/kate-vsn/churn-service:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha, mode=max
 
@@ -90,7 +90,7 @@ jobs:
 
       - name: Set deployed image tag
         run: |
-          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/churn-service:sha-${{ github.sha }}"
+          IMAGE_TAG="ghcr.io/kate-vsn/churn-service:sha-${{ github.sha }}"
           kubectl set image deployment/churn-api-deployment churn-api=$IMAGE_TAG
 
       - name: Wait for rollout to complete
