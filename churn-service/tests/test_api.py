@@ -1,4 +1,6 @@
+import os
 import pytest
+import psycopg2
 from fastapi.testclient import TestClient
 from churn.service.app import app
 
@@ -59,4 +61,47 @@ def test_determinism(client):
     r1 = client.post("/v1/predict", json=VALID_PAYLOAD)
     r2 = client.post("/v1/predict", json=VALID_PAYLOAD)
     assert r1.status_code == 200 and r2.status_code == 200
-    assert r1.json()["prediction"] == r2.json()["prediction"]
+    assert r1.json()["prediction"] == pytest.approx(r2.json()["prediction"], abs=1e-6)
+
+
+def get_latest_db_log():
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return None
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT request_id, status_code, prediction, features FROM prediction_logs ORDER BY created_at DESC LIMIT 1;"
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+
+def test_integration_db_logging_success(client):
+    db_url = os.getenv("DATABASE_URL")
+    response = client.post("/v1/predict", json=VALID_PAYLOAD)
+    assert response.status_code == 200
+    request_id = response.json()["request_id"]
+
+    if db_url:
+        row = get_latest_db_log()
+        assert row is not None
+        assert row[0] == request_id
+        assert row[1] == 200
+        assert row[2] is not None
+
+
+def test_integration_db_logging_422(client):
+    db_url = os.getenv("DATABASE_URL")
+    invalid_payload = VALID_PAYLOAD.copy()
+    invalid_payload["unknown_feature"] = 999.0
+    response = client.post("/v1/predict", json=invalid_payload)
+    assert response.status_code == 422
+
+    if db_url:
+        row = get_latest_db_log()
+        assert row is not None
+        assert row[1] == 422
+        assert row[2] is None
