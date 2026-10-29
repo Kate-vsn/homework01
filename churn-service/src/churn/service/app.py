@@ -16,16 +16,15 @@ ml_bundle = {}
 async def lifespan(app: FastAPI):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     artifacts_dir = os.path.abspath(os.path.join(base_dir, "..", "artifacts"))
+    bundle_path = os.path.join(artifacts_dir, "model_bundle.joblib")
 
     try:
-        ml_bundle["model"] = joblib.load(
-            os.path.join(artifacts_dir, "housing_model.pkl")
-        )
-        ml_bundle["scaler"] = joblib.load(os.path.join(artifacts_dir, "scaler.pkl"))
-        ml_bundle["features"] = joblib.load(
-            os.path.join(artifacts_dir, "feature_names.pkl")
-        )
-        ml_bundle["version"] = "1.0.0"
+        loaded_bundle = joblib.load(bundle_path)
+        ml_bundle["pipeline"] = loaded_bundle["pipeline"]
+
+        passport = loaded_bundle.get("passport", {})
+        ml_bundle["version"] = passport.get("version", "1.0.0")
+        ml_bundle["features"] = passport.get("feature_names", [])
     except Exception as e:
         print(f"Ошибка загрузки артефактов модели: {e}")
 
@@ -61,14 +60,18 @@ app = FastAPI(title="California Housing ML Service", lifespan=lifespan)
 class HousingFeatures(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    MedInc: float = Field(..., description="Медианный доход")
-    HouseAge: float = Field(..., description="Возраст домов")
-    AveRooms: float = Field(..., description="Среднее кол-во комнат")
-    AveBedrms: float = Field(..., description="Среднее кол-во спален")
-    Population: float = Field(..., description="Население")
-    AveOccup: float = Field(..., description="Среднее число жильцов")
-    Latitude: float = Field(..., description="Широта")
-    Longitude: float = Field(..., description="Долгота")
+    MedInc: float = Field(..., gt=0.0, le=20.0, description="Медианный доход")
+    HouseAge: float = Field(..., ge=1.0, le=100.0, description="Возраст домов")
+    AveRooms: float = Field(..., gt=0.0, le=200.0, description="Среднее кол-во комнат")
+    AveBedrms: float = Field(..., gt=0.0, le=50.0, description="Среднее число спален")
+    Population: float = Field(..., ge=1.0, le=100000.0, description="Население")
+    AveOccup: float = Field(..., gt=0.0, le=2000.0, description="Среднее число жильцов")
+    Latitude: float = Field(
+        ..., ge=32.0, le=43.0, description="Широта (география Калифорнии)"
+    )
+    Longitude: float = Field(
+        ..., ge=-125.0, le=-113.0, description="Долгота (география Калифорнии)"
+    )
 
 
 @app.get("/health")
@@ -78,7 +81,7 @@ def health():
 
 @app.get("/ready")
 def ready():
-    if "model" in ml_bundle and "scaler" in ml_bundle and "features" in ml_bundle:
+    if "pipeline" in ml_bundle and "version" in ml_bundle:
         return {"status": "ready"}
     raise HTTPException(status_code=503, detail="Model not loaded")
 
@@ -92,9 +95,12 @@ def predict(payload: HousingFeatures, request: Request, response: Response):
     features_dict = payload.model_dump()
 
     try:
-        input_df = pd.DataFrame([features_dict])[ml_bundle["features"]]
-        input_scaled = ml_bundle["scaler"].transform(input_df)
-        pred_value = ml_bundle["model"].predict(input_scaled)[0]
+        if ml_bundle.get("features"):
+            input_df = pd.DataFrame([features_dict])[ml_bundle["features"]]
+        else:
+            input_df = pd.DataFrame([features_dict])
+
+        pred_value = ml_bundle["pipeline"].predict(input_df)[0]
     except Exception as e:
         latency_ms = (time.time() - start_time) * 1000
         log_to_db(request_id, version, features_dict, None, latency_ms, 500)
