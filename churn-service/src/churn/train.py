@@ -1,39 +1,47 @@
+from pathlib import Path
 import joblib
 from churn.preprocess import CaliforniaHousingPreprocessor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
-import os
-from pathlib import Path
+from sklearn.pipeline import Pipeline
 
 
 def train_pipeline():
-    print("1. Инициализация препроцессора и загрузка данных...")
     preprocessor = CaliforniaHousingPreprocessor(test_size=0.2, random_state=42)
-    X_train, X_test, y_train, y_test, scaler, feature_names = (
+    X_train_scaled, X_test_scaled, y_train, y_test, scaler, feature_names = (
         preprocessor.load_and_preprocess_data()
     )
 
-    print("2. Обучение модели (RandomForest)...")
-    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-    model.fit(X_train, y_train)
+    model = RandomForestRegressor(
+        n_estimators=50, max_depth=12, random_state=42, n_jobs=-1
+    )
+    model.fit(X_train_scaled, y_train)
 
-    # Оценка качества модели
-    predictions = model.predict(X_test)
+    predictions = model.predict(X_test_scaled)
     r2 = r2_score(y_test, predictions)
     mse = mean_squared_error(y_test, predictions)
 
-    print(f"Качество модели:")
-    print(f"  - R2 Score: {r2:.4f}")
-    print(f"  - MSE: {mse:.4f}")
+    pipeline = Pipeline([("scaler", scaler), ("model", model)])
 
-    print("3. Сохранение артефактов...")
-    joblib.dump(model, artifacts_dir / "housing_model.pkl")
-    joblib.dump(scaler, artifacts_dir / "scaler.pkl")
-    joblib.dump(feature_names, artifacts_dir / "feature_names.pkl")
-    print("Готово! Все артефакты успешно сохранены.")
+    bundle = {
+        "pipeline": pipeline,
+        "passport": {
+            "version": "1.0.0",
+            "model_type": "RandomForestRegressor",
+            "feature_names": feature_names,
+            "metrics": {
+                "r2": round(float(r2), 4),
+                "mse": round(float(mse), 4),
+            },
+        },
+    }
+
+    artifacts_dir = Path(__file__).resolve().parent / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    bundle_path = artifacts_dir / "model_bundle.joblib"
+    joblib.dump(bundle, bundle_path, compress=("zlib", 3))
 
 
 if __name__ == "__main__":
-    artifacts_dir = Path(__file__).resolve().parent / "artifacts"
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
     train_pipeline()
