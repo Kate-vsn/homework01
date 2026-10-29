@@ -32,15 +32,15 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: cd churn-service && uv sync --frozen
 
       - name: Run linter
-        run: uv run ruff check .
+        run: cd churn-service && uv run ruff check .
 
       - name: Run tests with Postgres
         env:
           DATABASE_URL: postgresql://postgres:testpassword@localhost:5432/churn_test_db
-        run: uv run pytest
+        run: cd churn-service && uv run pytest
 
   build:
     needs: tests
@@ -63,7 +63,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./churn-service
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/churn-service:sha-${{ github.sha }}
           cache-from: type=gha
@@ -86,7 +86,7 @@ jobs:
             --from-literal=DATABASE_URL=postgresql://postgres:postgres@db:5432/churn_db
 
       - name: Apply Kubernetes manifests
-        run: kubectl apply -f k8s/
+        run: kubectl apply -f churn-service/k8s/
 
       - name: Set deployed image tag
         run: |
