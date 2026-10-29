@@ -24,7 +24,7 @@ spec:
         - configMapRef:
             name: churn-config
         - secretRef:
-            name: churn-secrets
+            name: mistake
         resources:
           requests:
             memory: "128Mi"
