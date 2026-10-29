@@ -7,10 +7,13 @@ import joblib
 import pandas as pd
 import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from psycopg2.extras import Json
 from pydantic import BaseModel, ConfigDict, Field
 
 ml_bundle = {}
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 
 @asynccontextmanager
@@ -58,6 +61,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="California Housing ML Service", lifespan=lifespan)
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Обработчик ошибок валидации 422 с сохранением логирования в БД."""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    version = ml_bundle.get("version", "1.0.0")
+
+    features = exc.body if isinstance(exc.body, dict) else {"raw": str(exc.body)}
+    latency_ms = (time.time() - start_time) * 1000
+
+    log_to_db(request_id, version, features, None, latency_ms, 422)
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
+
 class HousingFeatures(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,7 +98,7 @@ class HousingFeatures(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "log_level": LOG_LEVEL}
 
 
 @app.get("/ready")
