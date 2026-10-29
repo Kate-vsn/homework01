@@ -20,7 +20,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 async def lifespan(app: FastAPI):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     artifacts_dir = os.path.abspath(os.path.join(base_dir, "..", "artifacts"))
-    bundle_path = os.path.join(artifacts_dir, "false_path.joblib")
+    bundle_path = os.path.join(artifacts_dir, "model_bundle.joblib")
 
     try:
         loaded_bundle = joblib.load(bundle_path)
