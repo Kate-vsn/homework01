@@ -113,3 +113,14 @@ jobs:
               "Latitude": 35.6,
               "Longitude": -119.5
             }' | python3 -c "import json, sys; r=json.load(sys.stdin); assert r['prediction'] > 0, r"
+
+      - name: Диагностика
+        if: failure()
+        run: |
+
+          kubectl get pods -A -o wide
+          kubectl get secrets,configmap
+          kubectl get events --sort-by='.lastTimestamp' | tail -20
+          kubectl describe deploy/churn-api-deployment | tail -20
+          kubectl logs deploy/churn-api-deployment --tail=50 || true
+          kubectl logs deploy/churn-api-deployment --tail=50 --previous || true
