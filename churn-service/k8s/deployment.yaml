@@ -27,7 +27,7 @@ spec:
             name: churn-secrets
         resources:
           requests:
-            memory: "128Mi"
+            memory: "1000000000Mi"
             cpu: "100m"
           limits:
             memory: "512Mi"
