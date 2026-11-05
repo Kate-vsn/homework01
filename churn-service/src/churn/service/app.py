@@ -16,6 +16,27 @@ ml_bundle = {}
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 
+def log_to_db(request_id, version, features, prediction, latency_ms, status_code):
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO prediction_logs (request_id, version, features, prediction, latency_ms, status_code)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (request_id, version, Json(features), prediction, latency_ms, status_code),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:  # noqa: BLE001
+        print(f"Ошибка логирования в БД: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -146,24 +167,3 @@ def predict(payload: HousingFeatures, request: Request, response: Response):
         "request_id": request_id,
         "latency_ms": round(latency_ms, 2),
     }
-
-
-def log_to_db(request_id, version, features, prediction, latency_ms, status_code):
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        return
-    try:
-        conn = psycopg2.connect(db_url)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO prediction_logs (request_id, version, features, prediction, latency_ms, status_code)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (request_id, version, Json(features), prediction, latency_ms, status_code),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:  # noqa: BLE001
-        print(f"Ошибка логирования в БД: {e}")
