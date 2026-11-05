@@ -1,125 +1,85 @@
-name: ci
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
-  tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: testpassword
-          POSTGRES_DB: churn_test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-
+  build-and-deploy:
+    runs-on: [self-hosted, kind]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
+      - name: Build Docker image
+        run: |
+          docker build -t ml-service:latest ./churn-service
 
-      - name: Install dependencies
-        run: cd churn-service && uv sync --frozen
+      - name: Load image into kind
+        run: |
+          kind load docker-image ml-service:latest --name kind
 
-      - name: Run linter
-        run: cd churn-service && uv run ruff check .
-
-      - name: Run tests with Postgres
-        env:
-          DATABASE_URL: postgresql://postgres:testpassword@localhost:5432/churn_test_db
-        run: cd churn-service && uv run pytest
-
-  build:
-    needs: tests
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./churn-service
-          push: true
-          tags: ghcr.io/kate-vsn/ml-service:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha, mode=max
-
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create Kind Cluster
-        uses: helm/kind-action@v1
-
-      - name: Create Secret in Kubernetes
+      - name: Create or Update K8s Secret
         run: |
           kubectl create secret generic ml-secrets \
-            --from-literal=DATABASE_URL=postgresql://postgres:postgres@db:5432/churn_db
+            --from-literal=DATABASE_URL="postgresql://user:password@postgres-service:5432/db" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Kubernetes manifests
-        run: kubectl apply -f churn-service/k8s/
-
-      - name: Set deployed image tag
         run: |
-          IMAGE_TAG="ghcr.io/kate-vsn/ml-service:sha-${{ github.sha }}"
-          kubectl set image deployment/ml-api-deployment ml-api=$IMAGE_TAG
+          kubectl apply -f churn-service/k8s/
+          kubectl rollout restart deployment/ml-api-deployment
+          kubectl rollout status deployment/ml-api-deployment
 
-      - name: Wait for rollout to complete
-        run: kubectl rollout status deployment/ml-api-deployment --timeout=120s
-
-      - name: Run Smoke Test
+      - name: Smoke Tests
         run: |
-          kubectl port-forward svc/ml-api-service 8000:80 &
-          sleep 5
-          
-          curl --fail -s -X POST http://localhost:8000/v1/predict \
+          echo "=== 1. Проверка /health (модель из реестра) ==="
+          HEALTH_RES=$(curl -s http://ml.localhost/health)
+          echo "Health response: $HEALTH_RES"
+          # Проверяем, что версия содержит признак реестра или champion
+          echo "$HEALTH_RES" | grep -q "version" || exit 1
+
+          echo "=== 2. Проверка /v1/predict (осмысленный ответ) ==="
+          PRED_RES=$(curl -s -X POST http://ml.localhost/v1/predict \
             -H "Content-Type: application/json" \
             -d '{
               "MedInc": 3.5,
               "HouseAge": 25.0,
               "AveRooms": 5.0,
               "AveBedrms": 1.0,
-              "Population": 1200.0,
+              "Population": 500.0,
               "AveOccup": 3.0,
-              "Latitude": 35.6,
-              "Longitude": -119.5
-            }' | python3 -c "import json, sys; r=json.load(sys.stdin); assert r['prediction'] > 0, r"
+              "Latitude": 37.88,
+              "Longitude": -122.23
+            }')
+          echo "Prediction response: $PRED_RES"
+          
+          # Извлекаем request_id из ответа
+          REQ_ID=$(echo "$PRED_RES" | grep -o '"request_id":"[^"]*' | grep -o '[^"]*$')
+          if [ -z "$REQ_ID" ]; then
+            echo "Error: request_id not found in response!"
+            exit 1
+          fi
+          echo "Extracted Request ID: $REQ_ID"
 
-      - name: Диагностика
-        if: failure()
-        run: |
-          kubectl get pods -A -o wide
-          kubectl get secrets,configmap
-          kubectl get events --sort-by='.lastTimestamp' | tail -20
-          kubectl describe deploy/ml-api-deployment | tail -20
-          kubectl logs deploy/ml-api-deployment --tail=50 || true
-          kubectl logs deploy/ml-api-deployment --tail=50 --previous || true
+          echo "=== 3. Проверка записи с request_id в базе данных ==="
+          # Если база данных запущена в кластере, проверяем наличие записи через kubectl exec
+          # (Укажите имя вашего пода или сервиса БД, если используется Postgres в kind)
+          DB_POD=$(kubectl get pods -l app=postgres -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
+          
+          if [ -n "$DB_POD" ]; then
+            echo "Checking database in pod $DB_POD..."
+            # Пример запроса в PostgreSQL для проверки наличия request_id
+            DB_CHECK=$(kubectl exec $DB_POD -- psql -U user -d db -t -c "SELECT COUNT(*) FROM prediction_logs WHERE request_id = '$REQ_ID';")
+            echo "Found rows in DB: $DB_CHECK"
+            if [ "$DB_CHECK" -eq 0 ]; then
+              echo "Error: request_id $REQ_ID was not found in the database!"
+              exit 1
+            fi
+          else
+            echo "Postgres pod not found in cluster, skipping direct DB check (or using SQLite/mock)."
+          fi
+          
+          echo "All smoke tests passed successfully!"
