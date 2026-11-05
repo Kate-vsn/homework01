@@ -1,6 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: churn-config
+  name: ml-config
 data:
   LOG_LEVEL: "INFO"
+  MODEL_NAME: "ml"
+  MODEL_ALIAS: "champion"
+  MLFLOW_TRACKING_URI: "http://mlflow-service:5000"

@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: churn-api-deployment
+  name: ml-api-deployment
   labels:
-    app: churn-api
+    app: ml-api
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: churn-api
+      app: ml-api
   template:
     metadata:
       labels:
-        app: churn-api
+        app: ml-api
     spec:
       containers:
-      - name: churn-api
-        image: churn-service:latest
+      - name: ml-api
+        image: ml-service:latest  # Если меняла название образа в ci.yml, обнови и здесь (например, ml-service:latest)
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
         envFrom:
         - configMapRef:
-            name: churn-config
+            name: ml-config  # Связка с новым ConfigMap
         - secretRef:
-            name: churn-secrets
+            name: ml-secrets # Убедись, что при создании секрета в ci.yml (kubectl create secret) ты тоже укажешь имя ml-secrets
         resources:
           requests:
             memory: "128Mi"

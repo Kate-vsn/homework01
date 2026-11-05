@@ -82,7 +82,7 @@ jobs:
 
       - name: Create Secret in Kubernetes
         run: |
-          kubectl create secret generic churn-secrets \
+          kubectl create secret generic ml-secrets \
             --from-literal=DATABASE_URL=postgresql://postgres:postgres@db:5432/churn_db
 
       - name: Apply Kubernetes manifests
@@ -91,14 +91,14 @@ jobs:
       - name: Set deployed image tag
         run: |
           IMAGE_TAG="ghcr.io/kate-vsn/churn-service:sha-${{ github.sha }}"
-          kubectl set image deployment/churn-api-deployment churn-api=$IMAGE_TAG
+          kubectl set image deployment/ml-api-deployment churn-api=$IMAGE_TAG
 
       - name: Wait for rollout to complete
-        run: kubectl rollout status deployment/churn-api-deployment --timeout=120s
+        run: kubectl rollout status deployment/ml-api-deployment --timeout=120s
 
       - name: Run Smoke Test
         run: |
-          kubectl port-forward svc/churn-api-service 8000:80 &
+          kubectl port-forward svc/ml-api-service 8000:80 &
           sleep 5
           
           curl --fail -s -X POST http://localhost:8000/v1/predict \
@@ -120,6 +120,6 @@ jobs:
           kubectl get pods -A -o wide
           kubectl get secrets,configmap
           kubectl get events --sort-by='.lastTimestamp' | tail -20
-          kubectl describe deploy/churn-api-deployment | tail -20
-          kubectl logs deploy/churn-api-deployment --tail=50 || true
-          kubectl logs deploy/churn-api-deployment --tail=50 --previous || true
+          kubectl describe deploy/ml-api-deployment | tail -20
+          kubectl logs deploy/ml-api-deployment --tail=50 || true
+          kubectl logs deploy/ml-api-deployment --tail=50 --previous || true
