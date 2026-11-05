@@ -16,15 +16,15 @@ spec:
     spec:
       containers:
       - name: ml-api
-        image: ml-service:latest  # Если меняла название образа в ci.yml, обнови и здесь (например, ml-service:latest)
+        image: ml-service:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
         envFrom:
         - configMapRef:
-            name: ml-config  # Связка с новым ConfigMap
+            name: ml-config 
         - secretRef:
-            name: ml-secrets # Убедись, что при создании секрета в ci.yml (kubectl create secret) ты тоже укажешь имя ml-secrets
+            name: ml-secrets 
         resources:
           requests:
             memory: "128Mi"
