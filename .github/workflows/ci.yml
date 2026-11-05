@@ -35,13 +35,9 @@ jobs:
 
       - name: Smoke Tests
         run: |
-          echo "=== 1. Проверка /health (модель из реестра) ==="
           HEALTH_RES=$(curl -s http://ml.localhost/health)
           echo "Health response: $HEALTH_RES"
-          # Проверяем, что версия содержит признак реестра или champion
           echo "$HEALTH_RES" | grep -q "version" || exit 1
-
-          echo "=== 2. Проверка /v1/predict (осмысленный ответ) ==="
           PRED_RES=$(curl -s -X POST http://ml.localhost/v1/predict \
             -H "Content-Type: application/json" \
             -d '{
@@ -56,7 +52,6 @@ jobs:
             }')
           echo "Prediction response: $PRED_RES"
           
-          # Извлекаем request_id из ответа
           REQ_ID=$(echo "$PRED_RES" | grep -o '"request_id":"[^"]*' | grep -o '[^"]*$')
           if [ -z "$REQ_ID" ]; then
             echo "Error: request_id not found in response!"
@@ -64,14 +59,10 @@ jobs:
           fi
           echo "Extracted Request ID: $REQ_ID"
 
-          echo "=== 3. Проверка записи с request_id в базе данных ==="
-          # Если база данных запущена в кластере, проверяем наличие записи через kubectl exec
-          # (Укажите имя вашего пода или сервиса БД, если используется Postgres в kind)
           DB_POD=$(kubectl get pods -l app=postgres -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
           
           if [ -n "$DB_POD" ]; then
             echo "Checking database in pod $DB_POD..."
-            # Пример запроса в PostgreSQL для проверки наличия request_id
             DB_CHECK=$(kubectl exec $DB_POD -- psql -U user -d db -t -c "SELECT COUNT(*) FROM prediction_logs WHERE request_id = '$REQ_ID';")
             echo "Found rows in DB: $DB_CHECK"
             if [ "$DB_CHECK" -eq 0 ]; then
