@@ -64,7 +64,7 @@ Airflow перезапускает `ml-api-deployment`; под сервиса ч
 | 2. Метрики модели | `ml_model_info{version}`, `ml_predicted_value` (гистограмма распределения предсказания) | готово |
 | 2. ServiceMonitor | `churn-service/k8s/monitoring/servicemonitor.yaml`, порт `http` в `service.yaml` | готово |
 | 2. Дашборд | `churn-service/k8s/monitoring/dashboard.yaml`, метка `grafana_dashboard: "1"` | готово |
-| 2. Генератор трафика | `churn-service/scripts/traffic.py` на ваших признаках, `--bad`, печать версий | готово |
+| 2. Генератор трафика | `churn-service/scripts/traffic.py`, печать версий | готово |
 | 2. preStop | `churn-service/k8s/deployment.yaml`, `lifecycle.preStop.sleep.seconds: 5` | готово |
 | 2. Smoke по метрике версии | `.github/workflows/ci.yml`, шаг smoke: `grep '^ml_model_info{version='` | готово |
 | 3. DVC и S3 | `.dvc/config` (remote `laptop` и `cluster`), `housing.csv.dvc`, `Dockerfile` с `COPY .dvc/config` и `core.no_scm`, `.dockerignore` | готово |
