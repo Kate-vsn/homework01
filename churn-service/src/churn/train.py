@@ -78,6 +78,7 @@ def train_pipeline() -> dict:
             sk_model=pipeline,
             artifact_path="model",
             registered_model_name=REGISTERED_MODEL_NAME,
+            skops_trusted_types=["sklearn.tree._tree.Tree"],
         )
         model_version = model_info.registered_model_version
 
