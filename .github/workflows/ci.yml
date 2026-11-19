@@ -61,29 +61,36 @@ jobs:
     env:
       KIND_CLUSTER: kind
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: kind, kubectl и доступ к кластеру
+      - name: Checkout repository
+        shell: bash
         run: |
-          B=~/.local/bin && mkdir -p $B && echo "$B" >> "$GITHUB_PATH"
-          [ -x $B/kind ] || curl -sSLo $B/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-          [ -x $B/kubectl ] || curl -sSLo $B/kubectl https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
-          chmod +x $B/kind $B/kubectl
-          $B/kind export kubeconfig --name "$KIND_CLUSTER" --internal
-          $B/kubectl get nodes
+          rm -rf ./* ./.[!.]* 2>/dev/null || true
+          git init
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch --depth=1 origin "${{ github.sha }}"
+          git checkout FETCH_HEAD
 
-      - name: образ в кластер
+      - name: Set IMAGE variable and login to GHCR
+        shell: bash
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${REPO_LOWER}:sha-${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Доступ к кластеру kind
+        shell: bash
+        run: |
+          kind export kubeconfig --name "$KIND_CLUSTER"
+          kubectl get nodes
+
+      - name: Образ в кластер
+        shell: bash
         run: |
           docker pull "$IMAGE"
           kind load docker-image "$IMAGE" --name "$KIND_CLUSTER"
 
-      - name: секреты
+      - name: Секреты
+        shell: bash
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
@@ -92,28 +99,32 @@ jobs:
             --from-literal=DATABASE_URL="postgresql://user:$DB_PASSWORD@postgres-service:5432/db" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: база
+      - name: База
+        shell: bash
         run: |
           kubectl apply -f churn-service/k8s/postgres.yaml
           kubectl rollout status deploy/postgres --timeout=180s
 
-      - name: сервис
+      - name: Сервис
+        shell: bash
         run: |
           kubectl apply -f churn-service/k8s/configmap.yaml -f churn-service/k8s/service.yaml
           kubectl apply -f churn-service/k8s/deployment.yaml
           kubectl set image deploy/ml-api-deployment ml-api="$IMAGE"
           kubectl rollout status deploy/ml-api-deployment --timeout=300s
 
-      - name: мониторинг и DAG
+      - name: Мониторинг и DAG
+        shell: bash
         run: |
           kubectl apply -f churn-service/k8s/monitoring/
           kubectl -n mlops create configmap airflow-dags --from-file=churn-service/dags/ \
             --dry-run=client -o yaml | kubectl apply -f -
           kubectl -n mlops exec deploy/airflow -- airflow variables set ml_image "$IMAGE"
 
-      - name: smoke
+      - name: Smoke
+        shell: bash
         run: |
-          U="http://$KIND_CLUSTER-control-plane:30080"; H="Host: ml.localhost"
+          U="http://localhost"; H="Host: ml.localhost"
 
           curl --fail -s --retry 5 --retry-all-errors -H "$H" $U/health | tee health.json; echo
           grep -q '"version":"california_housing_rf-v' health.json
@@ -123,15 +134,15 @@ jobs:
 
           sleep 2
 
-          RID=$(jq -r .request_id pred.json)
+          RID=$(python -c "import json; print(json.load(open('pred.json'))['request_id'])")
           kubectl exec deploy/postgres -- psql -U user -d db \
-            -tAc "SELECT count(*) FROM prediction_logs WHERE request_id = '$RID'" | grep -qx 1
+            -tAc "SELECT count(*) FROM prediction_logs WHERE request_id = '$RID'" | tr -d '\r' | grep -qx 1
 
-          # проверяем метрику версии модели, а не счётчик запросов: второй под мог ещё не считать запросы
           curl --fail -s -H "$H" $U/metrics | grep -q '^ml_model_info{version="california_housing_rf-v'
 
-      - name: диагностика
+      - name: Диагностика
         if: failure()
+        shell: bash
         run: |
           kubectl get pods -A -o wide
           kubectl get ingress -A
