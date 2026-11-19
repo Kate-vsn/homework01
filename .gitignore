@@ -1,3 +1,10 @@
 
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.vscode/
+# эталонный репозиторий курса лежит рядом как справочник, в наш репозиторий не входит
+ML_PRO2026/
