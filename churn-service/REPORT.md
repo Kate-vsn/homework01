@@ -82,8 +82,7 @@ Airflow перезапускает `ml-api-deployment`; под сервиса ч
 
 **1. Как восстановить ровно тот код и те данные, на которых обучена версия N?**
 Нужен номер версии в реестре `california_housing_rf` (он же виден в `/health` и в метрике
-`ml_model_info`). В MLflow у версии есть `run_id`: в прогоне лежат параметры `data_md5`, `n_estimators`,
-`max_depth` и график важности признаков, а сам артефакт модели — в `runs:/<run_id>/model`. По `data_md5`
+`ml_model_info`). В MLflow у версии есть `run_id`: в прогоне лежат параметры и график важности признаков, а сам артефакт модели — в `runs:/<run_id>/model`. По `data_md5`
 находится указатель в git: `git log -p churn-service/src/churn/data/housing.csv.dvc`, коммит с этим md5,
 из него `git checkout <коммит>` и `dvc checkout`, данные при необходимости `dvc pull -r cluster`. Код
 восстанавливается по коммиту, на котором собирался образ, — тег образа в CI равен SHA этого коммита.
@@ -155,7 +154,16 @@ MLflow, под сервиса при старте читает алиас `champ
 - **500 при предсказании.** В `app.py` обработчик `raise HTTPException(...)` без `from e` ронял линтер,
   а сам сервис отдавал только текст ошибки — поправлено на `raise ... from e`, ruff зелёный.
 - **Старый под 0/1 после выката.** Поды предыдущего деплоймента с ingress-nginx не проходили
-  readiness; после перехода на Traefik и `readinessProbe /ready` выкат проходит до конца.
+  readiness
+- Проблема с Traefik. Никак не хотел подгружаться, выдавал: 
+```
+== Traefik, Prometheus и Grafana
+Release "traefik" does not exist. Installing it now.
+Error: resource Deployment/traefik/traefik not ready. status: InProgress, message: Available: 0/1
+context deadline exceeded
+```
+Помогло включение впн
+
 
 ## Переделки
 
