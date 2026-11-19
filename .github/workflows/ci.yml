@@ -1,76 +1,139 @@
-name: CI/CD Pipeline
+name: ci
 
 on:
-  push:
-    branches: [ main ]
+  push: {branches: [main]}
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
-    runs-on: [self-hosted, kind]
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: user, POSTGRES_PASSWORD: password, POSTGRES_DB: db}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U user -d db"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/db
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: {enable-cache: true}
+      - run: uv sync --frozen --all-groups
+        working-directory: churn-service
+      - run: uv run ruff check .
+        working-directory: churn-service
+      - run: uv run pytest -q
+        working-directory: churn-service
 
-      - name: Build Docker image
+  build:
+    needs: tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: churn-service
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, kind]
+    concurrency: {group: deploy-kind}
+    timeout-minutes: 15
+    permissions: {contents: read, packages: read}
+    env:
+      KIND_CLUSTER: kind
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: kind, kubectl и доступ к кластеру
         run: |
-          docker build -t ml-service:latest ./churn-service
+          B=~/.local/bin && mkdir -p $B && echo "$B" >> "$GITHUB_PATH"
+          [ -x $B/kind ] || curl -sSLo $B/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+          [ -x $B/kubectl ] || curl -sSLo $B/kubectl https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
+          chmod +x $B/kind $B/kubectl
+          $B/kind export kubeconfig --name "$KIND_CLUSTER" --internal
+          $B/kubectl get nodes
 
-      - name: Load image into kind
+      - name: образ в кластер
         run: |
-          kind load docker-image ml-service:latest --name kind
+          docker pull "$IMAGE"
+          kind load docker-image "$IMAGE" --name "$KIND_CLUSTER"
 
-      - name: Create or Update K8s Secret
+      - name: секреты
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           kubectl create secret generic ml-secrets \
-            --from-literal=DATABASE_URL="postgresql://user:password@postgres-service:5432/db" \
+            --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" \
+            --from-literal=DATABASE_URL="postgresql://user:$DB_PASSWORD@postgres-service:5432/db" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Apply Kubernetes manifests
+      - name: база
         run: |
-          kubectl apply -f churn-service/k8s/
-          kubectl rollout restart deployment/ml-api-deployment
-          kubectl rollout status deployment/ml-api-deployment
+          kubectl apply -f churn-service/k8s/postgres.yaml
+          kubectl rollout status deploy/postgres --timeout=180s
 
-      - name: Smoke Tests
+      - name: сервис
         run: |
-          HEALTH_RES=$(curl -s http://ml.localhost/health)
-          echo "Health response: $HEALTH_RES"
-          echo "$HEALTH_RES" | grep -q "version" || exit 1
-          PRED_RES=$(curl -s -X POST http://ml.localhost/v1/predict \
-            -H "Content-Type: application/json" \
-            -d '{
-              "MedInc": 3.5,
-              "HouseAge": 25.0,
-              "AveRooms": 5.0,
-              "AveBedrms": 1.0,
-              "Population": 500.0,
-              "AveOccup": 3.0,
-              "Latitude": 37.88,
-              "Longitude": -122.23
-            }')
-          echo "Prediction response: $PRED_RES"
-          
-          REQ_ID=$(echo "$PRED_RES" | grep -o '"request_id":"[^"]*' | grep -o '[^"]*$')
-          if [ -z "$REQ_ID" ]; then
-            echo "Error: request_id not found in response!"
-            exit 1
-          fi
-          echo "Extracted Request ID: $REQ_ID"
+          kubectl apply -f churn-service/k8s/configmap.yaml -f churn-service/k8s/service.yaml
+          kubectl apply -f churn-service/k8s/deployment.yaml
+          kubectl set image deploy/ml-api-deployment ml-api="$IMAGE"
+          kubectl rollout status deploy/ml-api-deployment --timeout=300s
 
-          DB_POD=$(kubectl get pods -l app=postgres -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
-          
-          if [ -n "$DB_POD" ]; then
-            echo "Checking database in pod $DB_POD..."
-            DB_CHECK=$(kubectl exec $DB_POD -- psql -U user -d db -t -c "SELECT COUNT(*) FROM prediction_logs WHERE request_id = '$REQ_ID';")
-            echo "Found rows in DB: $DB_CHECK"
-            if [ "$DB_CHECK" -eq 0 ]; then
-              echo "Error: request_id $REQ_ID was not found in the database!"
-              exit 1
-            fi
-          else
-            echo "Postgres pod not found in cluster, skipping direct DB check (or using SQLite/mock)."
-          fi
-          
-          echo "All smoke tests passed successfully!"
+      - name: мониторинг и DAG
+        run: |
+          kubectl apply -f churn-service/k8s/monitoring/
+          kubectl -n mlops create configmap airflow-dags --from-file=churn-service/dags/ \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n mlops exec deploy/airflow -- airflow variables set ml_image "$IMAGE"
+
+      - name: smoke
+        run: |
+          U="http://$KIND_CLUSTER-control-plane:30080"; H="Host: ml.localhost"
+
+          curl --fail -s --retry 5 --retry-all-errors -H "$H" $U/health | tee health.json; echo
+          grep -q '"version":"california_housing_rf-v' health.json
+
+          curl --fail -s -X POST -H "$H" $U/v1/predict \
+            -H "Content-Type: application/json" -d @churn-service/good.json | tee pred.json; echo
+
+          sleep 2
+
+          RID=$(jq -r .request_id pred.json)
+          kubectl exec deploy/postgres -- psql -U user -d db \
+            -tAc "SELECT count(*) FROM prediction_logs WHERE request_id = '$RID'" | grep -qx 1
+
+          # проверяем метрику версии модели, а не счётчик запросов: второй под мог ещё не считать запросы
+          curl --fail -s -H "$H" $U/metrics | grep -q '^ml_model_info{version="california_housing_rf-v'
+
+      - name: диагностика
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl get ingress -A
+          kubectl describe deploy/ml-api-deployment | tail -20
+          kubectl logs deploy/ml-api-deployment --tail=50 || true
