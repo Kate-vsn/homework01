@@ -4,6 +4,6 @@ metadata:
   name: ml-config
 data:
   LOG_LEVEL: "INFO"
-  MODEL_NAME: "ml"
+  MODEL_NAME: "california_housing_rf"
   MODEL_ALIAS: "champion"
-  MLFLOW_TRACKING_URI: "http://mlflow-service:5000"
+  MLFLOW_TRACKING_URI: "http://mlflow.mlops:5000"

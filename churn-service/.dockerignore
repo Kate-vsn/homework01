@@ -1,0 +1,17 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.env
+k8s/
+tests/
+dags/
+scripts/
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+src/churn/data/*.csv
+

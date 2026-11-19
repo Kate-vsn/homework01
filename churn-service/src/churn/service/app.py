@@ -4,16 +4,29 @@ import uuid
 from contextlib import asynccontextmanager
 
 import joblib
+import mlflow
 import pandas as pd
 import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_client import Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 from psycopg2.extras import Json
 from pydantic import BaseModel, ConfigDict, Field
 
+MODEL_INFO = Gauge("ml_model_info", "Model loaded by this pod", ["version"])
+PREDICTED_VALUE = Histogram(
+    "ml_predicted_value",
+    "Predicted median house value (100k USD)",
+    buckets=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0],
+)
+LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1)
+
 ml_bundle = {}
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+MODEL_NAME = os.getenv("MODEL_NAME")
+MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow.localhost")
 
 
 def log_to_db(request_id, version, features, prediction, latency_ms, status_code):
@@ -33,25 +46,48 @@ def log_to_db(request_id, version, features, prediction, latency_ms, status_code
         conn.commit()
         cur.close()
         conn.close()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"Ошибка логирования в БД: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    artifacts_dir = os.path.abspath(os.path.join(base_dir, "..", "artifacts"))
-    bundle_path = os.path.join(artifacts_dir, "model_bundle.joblib")
+    if MODEL_NAME:
+        try:
+            mlflow.set_tracking_uri(MLFLOW_URI)
+            alias = os.getenv("MODEL_ALIAS", "champion")
+            mv = mlflow.MlflowClient().get_model_version_by_alias(MODEL_NAME, alias)
+            model_uri = f"models:/{MODEL_NAME}/{mv.version}"
+            loaded_pipeline = mlflow.sklearn.load_model(model_uri)
 
-    try:
-        loaded_bundle = joblib.load(bundle_path)
-        ml_bundle["pipeline"] = loaded_bundle["pipeline"]
+            ml_bundle["pipeline"] = loaded_pipeline
+            ml_bundle["version"] = f"{MODEL_NAME}-v{mv.version}"
+            if hasattr(loaded_pipeline, "feature_names_in_"):
+                ml_bundle["features"] = list(loaded_pipeline.feature_names_in_)
+            else:
+                ml_bundle["features"] = []
 
-        passport = loaded_bundle.get("passport", {})
-        ml_bundle["version"] = passport.get("version", "1.0.0")
-        ml_bundle["features"] = passport.get("feature_names", [])
-    except Exception as e:  # noqa: BLE001
-        print(f"Ошибка загрузки артефактов модели: {e}")
+            print(f"Модель {model_uri} успешно загружена из MLflow.")
+        except Exception as e:
+            print(f"Ошибка загрузки модели из MLflow: {e}")
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        artifacts_dir = os.path.abspath(os.path.join(base_dir, "..", "artifacts"))
+        bundle_path = os.path.join(artifacts_dir, "model_bundle.joblib")
+
+        try:
+            loaded_bundle = joblib.load(bundle_path)
+            ml_bundle["pipeline"] = loaded_bundle["pipeline"]
+
+            passport = loaded_bundle.get("passport", {})
+            ml_bundle["version"] = passport.get("version", "1.0.0-local")
+            ml_bundle["features"] = passport.get("feature_names", [])
+            print("Локальная модель успешно загружена.")
+        except Exception as e:
+            print(f"Ошибка загрузки артефактов модели: {e}")
+
+    if "version" in ml_bundle:
+        MODEL_INFO.labels(ml_bundle["version"]).set(1)
 
     db_url = os.getenv("DATABASE_URL")
     if db_url:
@@ -62,7 +98,7 @@ async def lifespan(app: FastAPI):
                 CREATE TABLE IF NOT EXISTS prediction_logs (
                     request_id VARCHAR(64),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    version VARCHAR(32),
+                    version VARCHAR(64),
                     features JSONB,
                     prediction FLOAT,
                     latency_ms FLOAT,
@@ -72,7 +108,7 @@ async def lifespan(app: FastAPI):
             conn.commit()
             cur.close()
             conn.close()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"Не удалось подключиться к базе данных: {e}")
 
     yield
@@ -80,11 +116,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="California Housing ML Service", lifespan=lifespan)
+Instrumentator().instrument(app, latency_lowr_buckets=LATENCY_BUCKETS).expose(app)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Обработчик ошибок валидации 422 с сохранением логирования в БД."""
     start_time = time.time()
     request_id = str(uuid.uuid4())
     version = ml_bundle.get("version", "1.0.0")
@@ -119,7 +155,11 @@ class HousingFeatures(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "log_level": LOG_LEVEL}
+    return {
+        "status": "ok",
+        "log_level": LOG_LEVEL,
+        "version": ml_bundle.get("version", "unknown"),
+    }
 
 
 @app.get("/ready")
@@ -144,13 +184,15 @@ def predict(payload: HousingFeatures, request: Request, response: Response):
             input_df = pd.DataFrame([features_dict])
 
         pred_value = ml_bundle["pipeline"].predict(input_df)[0]
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         latency_ms = (time.time() - start_time) * 1000
         log_to_db(request_id, version, features_dict, None, latency_ms, 500)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     latency_ms = (time.time() - start_time) * 1000
     status_code = 200
+
+    PREDICTED_VALUE.observe(float(pred_value))
 
     log_to_db(
         request_id,

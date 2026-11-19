@@ -1,0 +1,74 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-api-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  ml-api.json: |
+    {
+      "uid": "ml-api",
+      "title": "California Housing service",
+      "refresh": "10s",
+      "time": {"from": "now-30m", "to": "now"},
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Версия модели в подах (инфраструктура)",
+          "gridPos": {"x": 0, "y": 0, "w": 8, "h": 5},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "options": {"textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"refId": "A", "expr": "count by (version) (ml_model_info)", "legendFormat": "{{version}}", "instant": true}]
+        },
+        {
+          "id": 2, "type": "stat", "title": "Запросов к /v1/predict за 5 минут",
+          "gridPos": {"x": 8, "y": 0, "w": 8, "h": 5},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"refId": "A", "expr": "sum(increase(http_requests_total{handler=\"/v1/predict\"}[5m]))"}]
+        },
+        {
+          "id": 3, "type": "stat", "title": "Рестарты контейнеров сервиса (инфраструктура)",
+          "gridPos": {"x": 16, "y": 0, "w": 8, "h": 5},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"refId": "A", "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"default\", container=\"ml-api\"})"}]
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "Запросы в секунду (сервис)",
+          "gridPos": {"x": 0, "y": 5, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "reqps"}},
+          "targets": [{"refId": "A", "expr": "sum by (handler, status) (rate(http_requests_total{handler!=\"/metrics\"}[1m]))", "legendFormat": "{{handler}} {{status}}"}]
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "Задержка /v1/predict p50 и p95 (сервис)",
+          "gridPos": {"x": 12, "y": 5, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "s"}},
+          "targets": [
+            {"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{handler=\"/v1/predict\"}[1m])))", "legendFormat": "p50"},
+            {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{handler=\"/v1/predict\"}[1m])))", "legendFormat": "p95"}
+          ]
+        },
+        {
+          "id": 6, "type": "timeseries", "title": "Медиана предсказанной цены (модель)",
+          "gridPos": {"x": 0, "y": 13, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(ml_predicted_value_bucket[5m])))", "legendFormat": "p50 предсказания"}]
+        },
+        {
+          "id": 7, "type": "bargauge", "title": "Распределение предсказанной цены за 15 минут (модель)",
+          "gridPos": {"x": 12, "y": 13, "w": 12, "h": 8},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "options": {"orientation": "vertical", "displayMode": "basic", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"refId": "A", "expr": "sum by (le) (increase(ml_predicted_value_bucket[15m]))", "format": "heatmap", "legendFormat": "{{le}}"}]
+        }
+      ]
+    }
