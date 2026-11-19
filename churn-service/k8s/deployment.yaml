@@ -25,6 +25,10 @@ spec:
             name: ml-config 
         - secretRef:
             name: ml-secrets 
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 5
         resources:
           requests:
             memory: "128Mi"

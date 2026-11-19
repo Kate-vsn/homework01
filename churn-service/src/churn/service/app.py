@@ -10,8 +10,18 @@ import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_client import Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 from psycopg2.extras import Json
 from pydantic import BaseModel, ConfigDict, Field
+
+MODEL_INFO = Gauge("ml_model_info", "Model loaded by this pod", ["version"])
+PREDICTED_VALUE = Histogram(
+    "ml_predicted_value",
+    "Predicted median house value (100k USD)",
+    buckets=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0],
+)
+LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1)
 
 ml_bundle = {}
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -45,11 +55,13 @@ async def lifespan(app: FastAPI):
     if MODEL_NAME:
         try:
             mlflow.set_tracking_uri(MLFLOW_URI)
-            model_uri = f"models:/{MODEL_NAME}@champion"
+            alias = os.getenv("MODEL_ALIAS", "champion")
+            mv = mlflow.MlflowClient().get_model_version_by_alias(MODEL_NAME, alias)
+            model_uri = f"models:/{MODEL_NAME}/{mv.version}"
             loaded_pipeline = mlflow.sklearn.load_model(model_uri)
 
             ml_bundle["pipeline"] = loaded_pipeline
-            ml_bundle["version"] = f"{MODEL_NAME}@champion"
+            ml_bundle["version"] = f"{MODEL_NAME}-v{mv.version}"
             if hasattr(loaded_pipeline, "feature_names_in_"):
                 ml_bundle["features"] = list(loaded_pipeline.feature_names_in_)
             else:
@@ -73,6 +85,9 @@ async def lifespan(app: FastAPI):
             print("Локальная модель успешно загружена.")
         except Exception as e:
             print(f"Ошибка загрузки артефактов модели: {e}")
+
+    if "version" in ml_bundle:
+        MODEL_INFO.labels(ml_bundle["version"]).set(1)
 
     db_url = os.getenv("DATABASE_URL")
     if db_url:
@@ -101,6 +116,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="California Housing ML Service", lifespan=lifespan)
+Instrumentator().instrument(app, latency_lowr_buckets=LATENCY_BUCKETS).expose(app)
 
 
 @app.exception_handler(RequestValidationError)
@@ -171,10 +187,12 @@ def predict(payload: HousingFeatures, request: Request, response: Response):
     except Exception as e:
         latency_ms = (time.time() - start_time) * 1000
         log_to_db(request_id, version, features_dict, None, latency_ms, 500)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     latency_ms = (time.time() - start_time) * 1000
     status_code = 200
+
+    PREDICTED_VALUE.observe(float(pred_value))
 
     log_to_db(
         request_id,

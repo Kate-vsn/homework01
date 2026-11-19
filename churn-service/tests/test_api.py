@@ -66,6 +66,16 @@ def test_determinism(client):
     assert r1.json()["prediction"] == pytest.approx(r2.json()["prediction"], abs=1e-6)
 
 
+def test_metrics_expose_model_version(client):
+    client.post("/v1/predict", json=VALID_PAYLOAD)
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    body = response.text
+    assert "ml_model_info" in body
+    assert "ml_predicted_value_bucket" in body
+    assert "http_request_duration_seconds_bucket" in body
+
+
 def get_latest_db_log():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
