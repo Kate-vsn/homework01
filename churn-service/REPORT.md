@@ -155,7 +155,8 @@ MLflow, под сервиса при старте читает алиас `champ
   а сам сервис отдавал только текст ошибки — поправлено на `raise ... from e`, ruff зелёный.
 - **Старый под 0/1 после выката.** Поды предыдущего деплоймента с ingress-nginx не проходили
   readiness
-- Проблема с Traefik. Никак не хотел подгружаться, выдавал: 
+- **`/ready` отдавала 503.** Довольно глупая ошибка, попросту забыла натренировать модель и добавить ее под ником `california_housing_rf`.
+- **Проблема с Traefik.** Никак не хотел подгружаться, выдавал: 
 ```
 == Traefik, Prometheus и Grafana
 Release "traefik" does not exist. Installing it now.
@@ -163,7 +164,21 @@ Error: resource Deployment/traefik/traefik not ready. status: InProgress, messag
 context deadline exceeded
 ```
 Помогло включение впн
-
+- **Тренировка модели выдавала ошибку.** По логам ошибка возникала на этапе создания `model_info`, нужно было добавить строчку:
+```
+skops_trusted_types=["sklearn.tree._tree.Tree"],
+```
+- И также была ошибка на этапе раннера, когда **случился `memory limit exceeded`**, наплодились образы в ходе неудачных запусков, пришлось их почистить, загрузить образ напрямую без Temp, командой:
+```
+docker save ghcr.io/kate-vsn/homework01:sha-1464843ed50777d3bd5cf66181b1e72f5f767038 | docker exec -i kind-control-plane ctr --namespace=k8s.io images import -
+```
+Плюсом увеличила лимит памяти в `deployment.yaml':
+```
+requests:
+  memory: "512Mi"
+limits:
+  memory: "1Gi"
+```
 
 ## Переделки
 
