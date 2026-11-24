@@ -104,11 +104,11 @@ uv run dvc push                  # данные в S3 кластера (снач
 ```bash
 mkdir -p actions-runner && cd actions-runner
 curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.319.1/actions-runner-linux-x64-2.319.1.tar.gz
-tar xzf actions-runner.tar.gz && ./config.sh --url https://github.com/Kate-vsn/homework01 --token <TOKEN> --labels kind
+tar xzf actions-runner.tar.gz && ./config.sh --url https://github.com/<OWNER>/<REPO> --token <TOKEN> --labels kind
 ./run.sh
 ```
 
-Токен берётся в Settings → Actions → Runners → New self-hosted runner. Деплой запускается кнопкой:
+Токен берётся в Settings → Actions → Runners → New self-hosted runner. Подставьте URL своего форка вместо <OWNER>/<REPO>. Деплой запускается кнопкой:
 Actions → `ci` → Run workflow (или пушем в `main`). Job `deploy` собирает образ, заливает его в kind,
 создаёт секрет `ml-secrets`, деплоит базу и сервис, применяет ServiceMonitor, дашборд и ConfigMap с DAG,
 ставит переменную `ml_image` в Airflow и проходит smoke через Ingress.

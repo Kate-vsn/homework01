@@ -190,6 +190,63 @@ limits:
 | у сервиса не было `/metrics` | Instrumentator со своими бакетами, две метрики модели | `src/churn/service/app.py` |
 | не было базы в кластере, smoke не мог проверить запись | `k8s/postgres.yaml` с секретом `ml-secrets`, таблица создаётся сервисом при старте | `k8s/postgres.yaml` |
 | в образе не было `libgomp1`, RandomForest не импортировался | добавлен в Dockerfile, там же `--frozen` и `GIT_PYTHON_REFRESH=quiet` | `churn-service/Dockerfile` |
+| была указана ссылка на `Kate-vsn/homework01` | теперь команда такая ```tar xzf actions-runner.tar.gz && ./config.sh --url https://github.com/<OWNER>/<REPO> --token <TOKEN> --labels kind``` | файл `READ.ME` |
+./run.sh
+
+Плюсом прикладываю инфу с Quickstart: 
+```bash
+$ uv run python -c "from sklearn.datasets import fetch_california_housing; fetch_california_housing(as_frame=True).frame.to_csv('src/churn/data/housing.csv', index=False)"
+(churn-service) 
+Me@Me-Notebook MINGW64 ~/ml_course/churn-service (main)
+$ md5sum src/churn/data/housing.csv
+fa9fe4cf24f70b69ac65fb33062ddf34 *src/churn/data/housing.csv
+(churn-service) 
+Me@Me-Notebook MINGW64 ~/ml_course/churn-service (main)
+$ cat src/churn/data/housing.csv.dvc
+outs:
+- md5: fa9fe4cf24f70b69ac65fb33062ddf34
+  size: 1915795
+  hash: md5
+  path: housing.csv
+(churn-service) 
+
+\$ uv run dvc commit src/churn/data/housing.csv.dvc
+\$ uv run dvc push
+Collecting                                                                             |0.00 [00:00,    ?entry/s]
+Pushing
+1 file pushed  
+```
+И проверки ответа Ingress:
+```pwsh
+(churn-service) PS C:\Users\Me\ml_course> curl.exe -s http://ml.localhost/health
+{"status":"ok","log_level":"INFO","version":"california_housing_rf-v1"}
+(churn-service) PS C:\Users\Me\ml_course> curl.exe -s -X POST http://ml.localhost/v1/predict -H "Content-Type: application/json" --data-binary "@churn-service/good.json"
+{"prediction":1.5265183549783545,"version":"california_housing_rf-v1","request_id":"db365b36-4bc9-4bfb-95e7-f892b2a455e0","latency_ms":685.51}
+```
+Далее прикладываю скриншоты двух даг ранов.
+первый ран - manual__2026-11-24T14:13:40.326680+00:00
+![Отказ гейта](image.png)
+
+И инфа из логов:
+```pwsh
+(churn-service) PS C:\Users\Me\ml_course> curl.exe -s http://ml.localhost/health
+{"status":"ok","log_level":"INFO","version":"california_housing_rf-v1"}
+
+{"timestamp":"2026-11-24T14:14:49.798948Z","level":"info","event":"версия 2, r2 0.7847, champion до этого 1","logger":"task.stdout"}
+{"timestamp":"2026-11-24T14:14:49.798867Z","level":"info","event":"Done. Returned value was: False",...}
+{"timestamp":"2026-11-24T14:14:49.798981Z","level":"info","event":"Condition result is False",...}
+{"timestamp":"2026-11-24T14:14:49.799059Z","level":"info","event":"Skipping downstream tasks",...}
+```
+Затем я вручную выставила чемпионом вторую версию, и запустила ран уже на 100 estimators, как и было изначально.
+
+второй ран - manual__2026-11-24T14:47:26.083769+00:00
+![Все прошло](image-1.png)
+
+и лог:
+```pwsh
+(churn-service) PS C:\Users\Me\ml_course\churn-service> curl.exe -s http://ml.localhost/health
+{"status":"ok","log_level":"INFO","version":"california_housing_rf-v3"}
+```
 
 ## Домашка 2 (прежние разделы)
 
